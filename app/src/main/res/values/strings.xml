@@ -1,0 +1,11 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="app_name">Merge Video</string>
+    <string name="permission_required">동영상 접근 권한이 필요합니다.</string>
+    <string name="grant_permission">권한 허용</string>
+    <string name="no_videos">DCIM/Camera 폴더에 동영상이 없습니다.</string>
+    <string name="merge_button">병합 (%1$d)</string>
+    <string name="merging">병합 중...</string>
+    <string name="merge_done">병합 완료: %1$s</string>
+    <string name="merge_failed">병합 실패: %1$s</string>
+</resources>
