@@ -13,13 +13,12 @@ import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.launch
-import kotlinx.coroutines.withContext
 
 class VideoListViewModel(application: Application) : AndroidViewModel(application) {
 
     private val repository = VideoRepository(application)
     private val merger = VideoMerger(application)
-    private val sink = MergedVideoSink(application)
+    private val sinkFactory = MergedVideoSink(application)
 
     private val _uiState = MutableStateFlow<UiState>(UiState.NoPermission)
     val uiState: StateFlow<UiState> = _uiState.asStateFlow()
@@ -32,10 +31,9 @@ class VideoListViewModel(application: Application) : AndroidViewModel(applicatio
     }
 
     fun loadVideos() {
-        _uiState.value = UiState.Loading
-        viewModelScope.launch {
-            val videos = withContext(Dispatchers.IO) { repository.loadCameraVideos() }
-            _uiState.value = UiState.Loaded(videos)
+        viewModelScope.launch(Dispatchers.IO) {
+            _uiState.value = UiState.Loading
+            _uiState.value = UiState.Loaded(repository.loadCameraVideos())
         }
     }
 
@@ -53,23 +51,18 @@ class VideoListViewModel(application: Application) : AndroidViewModel(applicatio
         val uris = _selectedUris.value
         if (uris.size < 2) return
 
-        _uiState.value = UiState.Merging(0, uris.size)
-        viewModelScope.launch {
+        viewModelScope.launch(Dispatchers.IO) {
+            _uiState.value = UiState.Merging(0, uris.size)
             try {
-                val resultName = withContext(Dispatchers.IO) {
-                    val target = sink.create()
-                    try {
-                        merger.merge(uris, target.fd) { current, total ->
-                            _uiState.value = UiState.Merging(current, total)
-                        }
-                    } finally {
-                        target.close()
+                val resultName = sinkFactory.create().use { target ->
+                    merger.merge(uris, target.fileDescriptor) { current, total ->
+                        _uiState.value = UiState.Merging(current, total)
                     }
+                    target.commit()
                     target.displayName
                 }
                 _selectedUris.value = emptyList()
                 _uiState.value = UiState.Done(resultName)
-                loadVideos()
             } catch (t: Throwable) {
                 _uiState.value = UiState.Error(t.message ?: t::class.java.simpleName)
             }
@@ -77,9 +70,8 @@ class VideoListViewModel(application: Application) : AndroidViewModel(applicatio
     }
 
     fun acknowledgeMessage() {
-        when (_uiState.value) {
-            is UiState.Done, is UiState.Error -> loadVideos()
-            else -> Unit
+        if (_uiState.value is UiState.Done || _uiState.value is UiState.Error) {
+            loadVideos()
         }
     }
 }

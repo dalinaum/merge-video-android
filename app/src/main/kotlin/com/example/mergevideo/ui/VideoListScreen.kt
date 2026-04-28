@@ -2,6 +2,7 @@ package com.example.mergevideo.ui
 
 import android.content.pm.PackageManager
 import android.net.Uri
+import android.text.format.Formatter
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.background
@@ -67,25 +68,17 @@ fun VideoListScreen(
     LaunchedEffect(Unit) {
         val granted = ContextCompat.checkSelfPermission(context, permissionName) ==
             PackageManager.PERMISSION_GRANTED
-        if (granted) {
-            viewModel.onPermissionGranted()
-        } else {
-            permissionLauncher.launch(permissionName)
-        }
+        if (granted) viewModel.onPermissionGranted() else permissionLauncher.launch(permissionName)
     }
 
     LaunchedEffect(uiState) {
         when (val s = uiState) {
             is UiState.Done -> {
-                snackbarHostState.showSnackbar(
-                    context.getString(R.string.merge_done, s.displayName)
-                )
+                snackbarHostState.showSnackbar(context.getString(R.string.merge_done, s.displayName))
                 viewModel.acknowledgeMessage()
             }
             is UiState.Error -> {
-                snackbarHostState.showSnackbar(
-                    context.getString(R.string.merge_failed, s.message)
-                )
+                snackbarHostState.showSnackbar(context.getString(R.string.merge_failed, s.message))
                 viewModel.acknowledgeMessage()
             }
             else -> Unit
@@ -97,8 +90,7 @@ fun VideoListScreen(
         bottomBar = {
             BottomMergeBar(
                 selectedCount = selected.size,
-                isMerging = uiState is UiState.Merging,
-                mergingProgress = (uiState as? UiState.Merging),
+                mergingProgress = uiState as? UiState.Merging,
                 onMergeClick = viewModel::mergeSelected,
                 onClearClick = viewModel::clearSelection
             )
@@ -122,26 +114,27 @@ private fun VideoListContent(
     onRequestPermission: () -> Unit,
     onToggle: (Uri) -> Unit
 ) {
-    Box(
-        modifier = Modifier
-            .fillMaxSize()
-            .padding(padding),
-        contentAlignment = Alignment.Center
-    ) {
-        when (uiState) {
-            UiState.NoPermission -> PermissionRequestView(onRequestPermission)
-            UiState.Loading -> CircularProgressIndicator()
-            is UiState.Loaded -> {
-                if (uiState.videos.isEmpty()) {
-                    Text(text = stringResource(id = R.string.no_videos))
-                } else {
-                    VideoList(uiState.videos, selected, onToggle)
-                }
+    when (uiState) {
+        UiState.NoPermission -> Centered(padding) { PermissionRequestView(onRequestPermission) }
+        UiState.Loading -> Centered(padding) { CircularProgressIndicator() }
+        is UiState.Merging -> Centered(padding) { MergingView(uiState) }
+        is UiState.Done, is UiState.Error -> Centered(padding) { CircularProgressIndicator() }
+        is UiState.Loaded -> {
+            if (uiState.videos.isEmpty()) {
+                Centered(padding) { Text(text = stringResource(id = R.string.no_videos)) }
+            } else {
+                VideoList(uiState.videos, selected, padding, onToggle)
             }
-            is UiState.Merging -> MergingView(uiState)
-            is UiState.Done, is UiState.Error -> CircularProgressIndicator()
         }
     }
+}
+
+@Composable
+private fun Centered(padding: PaddingValues, content: @Composable () -> Unit) {
+    Box(
+        modifier = Modifier.fillMaxSize().padding(padding),
+        contentAlignment = Alignment.Center
+    ) { content() }
 }
 
 @Composable
@@ -162,7 +155,7 @@ private fun MergingView(state: UiState.Merging) {
         verticalArrangement = Arrangement.spacedBy(12.dp)
     ) {
         CircularProgressIndicator()
-        Text(text = "${state.current} / ${state.total}")
+        Text(text = stringResource(id = R.string.merging_progress, state.current, state.total))
         Text(text = stringResource(id = R.string.merging))
     }
 }
@@ -171,14 +164,17 @@ private fun MergingView(state: UiState.Merging) {
 private fun VideoList(
     videos: List<VideoItem>,
     selected: List<Uri>,
+    padding: PaddingValues,
     onToggle: (Uri) -> Unit
 ) {
-    LazyColumn(modifier = Modifier.fillMaxSize()) {
+    val orderByUri = remember(selected) {
+        buildMap<Uri, Int> { selected.forEachIndexed { i, u -> put(u, i + 1) } }
+    }
+    LazyColumn(modifier = Modifier.fillMaxSize().padding(padding)) {
         items(videos, key = { it.uri }) { item ->
-            val orderIndex = selected.indexOf(item.uri)
             VideoRow(
                 item = item,
-                orderNumber = if (orderIndex >= 0) orderIndex + 1 else null,
+                orderNumber = orderByUri[item.uri],
                 onClick = { onToggle(item.uri) }
             )
         }
@@ -191,11 +187,11 @@ private fun VideoRow(
     orderNumber: Int?,
     onClick: () -> Unit
 ) {
+    val context = LocalContext.current
     val isSelected = orderNumber != null
-    val rowBg = if (isSelected) {
-        MaterialTheme.colorScheme.primaryContainer
-    } else {
-        Color.Transparent
+    val rowBg = if (isSelected) MaterialTheme.colorScheme.primaryContainer else Color.Transparent
+    val subtitle = remember(item.durationMs, item.sizeBytes) {
+        "${formatDuration(item.durationMs)}   ${Formatter.formatShortFileSize(context, item.sizeBytes)}"
     }
     Row(
         modifier = Modifier
@@ -213,7 +209,7 @@ private fun VideoRow(
                 fontWeight = if (isSelected) FontWeight.SemiBold else FontWeight.Normal
             )
             Text(
-                text = "${formatDuration(item.durationMs)}   ${formatSize(item.sizeBytes)}",
+                text = subtitle,
                 fontSize = 12.sp,
                 color = MaterialTheme.colorScheme.onSurfaceVariant
             )
@@ -223,21 +219,12 @@ private fun VideoRow(
 
 @Composable
 private fun SelectionBadge(orderNumber: Int?) {
-    val bg = if (orderNumber != null) {
-        MaterialTheme.colorScheme.primary
-    } else {
-        MaterialTheme.colorScheme.surfaceVariant
-    }
-    val fg = if (orderNumber != null) {
-        MaterialTheme.colorScheme.onPrimary
-    } else {
-        MaterialTheme.colorScheme.onSurfaceVariant
-    }
+    val bg = if (orderNumber != null) MaterialTheme.colorScheme.primary
+             else MaterialTheme.colorScheme.surfaceVariant
+    val fg = if (orderNumber != null) MaterialTheme.colorScheme.onPrimary
+             else MaterialTheme.colorScheme.onSurfaceVariant
     Box(
-        modifier = Modifier
-            .size(36.dp)
-            .clip(CircleShape)
-            .background(bg),
+        modifier = Modifier.size(36.dp).clip(CircleShape).background(bg),
         contentAlignment = Alignment.Center
     ) {
         Text(
@@ -251,13 +238,13 @@ private fun SelectionBadge(orderNumber: Int?) {
 @Composable
 private fun BottomMergeBar(
     selectedCount: Int,
-    isMerging: Boolean,
     mergingProgress: UiState.Merging?,
     onMergeClick: () -> Unit,
     onClearClick: () -> Unit
 ) {
+    val isMerging = mergingProgress != null
     Column(modifier = Modifier.fillMaxWidth().padding(16.dp)) {
-        if (isMerging && mergingProgress != null) {
+        if (mergingProgress != null) {
             val total = mergingProgress.total.coerceAtLeast(1)
             LinearProgressIndicator(
                 progress = { mergingProgress.current.toFloat() / total },
@@ -269,11 +256,8 @@ private fun BottomMergeBar(
             horizontalArrangement = Arrangement.spacedBy(8.dp)
         ) {
             if (selectedCount > 0 && !isMerging) {
-                Button(
-                    onClick = onClearClick,
-                    modifier = Modifier.weight(1f)
-                ) {
-                    Text(text = "선택 해제")
+                Button(onClick = onClearClick, modifier = Modifier.weight(1f)) {
+                    Text(text = stringResource(id = R.string.clear_selection))
                 }
             }
             Button(
@@ -292,18 +276,6 @@ private fun formatDuration(durationMs: Long): String {
     val h = totalSec / 3600
     val m = (totalSec % 3600) / 60
     val s = totalSec % 60
-    return if (h > 0) {
-        String.format(Locale.US, "%d:%02d:%02d", h, m, s)
-    } else {
-        String.format(Locale.US, "%d:%02d", m, s)
-    }
-}
-
-private fun formatSize(bytes: Long): String {
-    val mb = bytes / 1024.0 / 1024.0
-    return if (mb >= 1024) {
-        String.format(Locale.US, "%.1f GB", mb / 1024.0)
-    } else {
-        String.format(Locale.US, "%.0f MB", mb)
-    }
+    return if (h > 0) String.format(Locale.US, "%d:%02d:%02d", h, m, s)
+           else String.format(Locale.US, "%d:%02d", m, s)
 }

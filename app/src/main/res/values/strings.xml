@@ -8,4 +8,6 @@
     <string name="merging">병합 중...</string>
     <string name="merge_done">병합 완료: %1$s</string>
     <string name="merge_failed">병합 실패: %1$s</string>
+    <string name="clear_selection">선택 해제</string>
+    <string name="merging_progress">%1$d / %2$d</string>
 </resources>
